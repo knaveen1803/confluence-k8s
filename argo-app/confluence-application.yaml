@@ -1,0 +1,203 @@
+# argo-app/confluence-application.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: confluence
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/confluence-k8s # Replace with your Git repository
+    targetRevision: HEAD
+    path: confluence
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: confluence
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - Validate=false
+
+---
+
+---
+
+---
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: confluence-secret
+  namespace: confluence
+type: Opaque
+data:
+  license: "" # Add your Confluence license key here (base64 encoded)
+
+---
+# confluence/confluence-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: confluence
+  namespace: confluence
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: confluence
+  template:
+    metadata:
+      labels:
+        app: confluence
+    spec:
+      containers:
+      - name: confluence
+        image: atlassian/confluence:8.5.4
+        env:
+        - name: ATL_TOMCAT_SCHEME
+          value: "https"
+        - name: ATL_TOMCAT_SECURE
+          value: "true"
+        - name: ATL_PROXY_NAME
+          value: "confluence.yourdomain.com" # Replace with your domain
+        - name: ATL_PROXY_PORT
+          value: "443"
+        - name: ATL_TOMCAT_CONTEXTPATH
+          value: ""
+        - name: JVM_MINIMUM_MEMORY
+          value: "1024m"
+        - name: JVM_MAXIMUM_MEMORY
+          value: "2048m"
+        - name: ATL_DB_TYPE
+          value: "postgresql"
+        - name: ATL_DB_DRIVER
+          value: "org.postgresql.Driver"
+        - name: ATL_JDBC_URL
+          value: "jdbc:postgresql://postgresql:5432/confluence"
+        - name: ATL_JDBC_USER
+          value: "confluence"
+        - name: ATL_JDBC_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-secret
+              key: password
+        ports:
+        - containerPort: 8090
+        volumeMounts:
+        - name: confluence-home
+          mountPath: /var/atlassian/application-data/confluence
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+        readinessProbe:
+          httpGet:
+            path: /status
+            port: 8090
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /status
+            port: 8090
+          initialDelaySeconds: 300
+          periodSeconds: 60
+          timeoutSeconds: 30
+      volumes:
+      - name: confluence-home
+        persistentVolumeClaim:
+          claimName: confluence-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: confluence
+  namespace: confluence
+spec:
+  selector:
+    app: confluence
+  ports:
+  - port: 8090
+    targetPort: 8090
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: confluence-pvc
+  namespace: confluence
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+# confluence/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: confluence-ingress
+  namespace: confluence
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod" # If using cert-manager
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+spec:
+  tls:
+  - hosts:
+    - confluence.yourdomain.com # Replace with your domain
+    secretName: confluence-tls
+  rules:
+  - host: confluence.yourdomain.com # Replace with your domain
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: confluence
+            port:
+              number: 8090
+
+---
+# confluence/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: confluence-config
+  namespace: confluence
+data:
+  server.xml: |
+    <?xml version="1.0" encoding="utf-8"?>
+    <Server port="8000" shutdown="SHUTDOWN" debug="0">
+      <Service name="Tomcat-Standalone">
+        <Connector port="8090" connectionTimeout="20000" redirectPort="8443"
+                   maxThreads="48" minSpareThreads="10"
+                   enableLookups="false" acceptCount="10" debug="0" URIEncoding="UTF-8"
+                   protocol="org.apache.coyote.http11.Http11NioProtocol"/>
+        <Engine name="Standalone" defaultHost="localhost" debug="0">
+          <Host name="localhost" debug="0" appBase="webapps" unpackWARs="true" autoDeploy="false" startStopThreads="4">
+            <Context path="" docBase="../confluence" debug="0" reloadable="false" useHttpOnly="true">
+              <Manager pathname=""/>
+            </Context>
+          </Host>
+        </Engine>
+      </Service>
+    </Server>
