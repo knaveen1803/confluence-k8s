@@ -10,7 +10,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/knaveen1803/confluence-k8s # Replace with your Git repository
-    targetRevision: HEAD
+    targetRevision: main
     path: confluence
   destination:
     server: https://kubernetes.default.svc
