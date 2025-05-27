@@ -9,7 +9,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/your-org/confluence-k8s # Replace with your Git repository
+    repoURL: https://github.com/knaveen1803/confluence-k8s # Replace with your Git repository
     targetRevision: HEAD
     path: confluence
   destination:
